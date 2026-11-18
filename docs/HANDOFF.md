@@ -2,19 +2,19 @@
 
 ## Current state — 2026-11-18
 
-- New local project at `/home/gamer/vortex`, separate from the active `/home/gamer/TROLLfx_RTA` checkout.
-- GitHub repository `https://github.com/420troll/vortex` exists; local `main` is initialized and tracks no remote branch yet.
-- Research archive downloaded to ignored `research_local/`; archive SHA-256: `8afe37707ce163f55285a755ba275ec5b3029cb630bb48028c67c2d4b9894462`.
-- Archive extraction has not run. The 65,536-byte firmware image hash and ROM analysis are unknown.
-- Service manual downloaded to `/tmp/vortex-service.pdf` (not part of repository). The PDF is scanned; detailed memory-map transcription still needs page-by-page visual review.
-- Prototype code and tests are present. Build verification is currently blocked because CMake is not installed in this environment. g++ is available; a direct compiler check is the next local action.
+- Project repository: `https://github.com/420troll/vortex`, branch `main`.
+- Canonical WSL checkout: `/home/gamer/vortex`.
+- ROM archive remains local and ignored; its archive hash and extraction status are documented in `ROM_FORENSICS.md`.
+- Windows x64 CMake preset, offline renderer, automated test, and WinMM real-time playback proof of concept are implemented.
+- Visual Studio 18 2026 / MSVC 14.51 Release build passed; CTest passed 1/1; Windows WAV render verified.
+- Windows build worktree and ignored output are under `C:\Users\Gamer\vortex-win\build\windows-vs2026-x64\` to avoid Visual Studio issues with WSL UNC paths.
 
 ## Next actions
 
-1. Confirm the GitHub repository is ready for push, commit this scaffold, and push `main`.
-2. Install/use CMake in the development environment and run the included test target.
-3. Extract the archive locally using an available RAR4 tool; record extracted bytes and SHA-256 only in docs.
-4. Visually transcribe the service manual's Theory of Operation pages and schematics into `HARDWARE_MAP.md`.
-5. Add exact MAME source version/license review before considering code integration.
+1. Add a graphical transport and continuously adjustable morph control over the existing playback host.
+2. Add output-device selection, input/output levels, and meters; test on a Windows audio device.
+3. Extract the firmware archive locally and record extracted size and SHA-256 without committing firmware.
+4. Transcribe the service manual memory tables and schematics into `HARDWARE_MAP.md`.
+5. Review exact MAME source version and licensing before considering CPU core integration.
 
 No Force deployment is part of this project phase.

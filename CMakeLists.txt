@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
 project(TROLLfxVortexLab VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -15,6 +15,11 @@ endif()
 
 add_executable(vortex-render tools/audio_render/main.cpp)
 target_link_libraries(vortex-render PRIVATE vortex_audio)
+
+if(WIN32)
+  add_executable(vortex-play tools/audio_player/winmm_player.cpp)
+  target_link_libraries(vortex-play PRIVATE vortex_audio winmm)
+endif()
 
 include(CTest)
 if(BUILD_TESTING)

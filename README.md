@@ -8,15 +8,17 @@ The first milestone scaffold includes a dependency-free stereo WAV renderer and 
 
 ## Build
 
-Requires CMake 3.20+ and a C++20 compiler. On Windows use a Visual Studio x64 developer shell:
+Requires CMake 3.21+ and a C++20 compiler. On Windows, list installed generators with `cmake -G`; the checked-in preset targets Visual Studio 2026 x64:
 
 ```powershell
-cmake -S . -B build -A x64
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
+cmake --preset windows-vs2026-x64
+cmake --build --preset windows-release
+ctest --preset windows-release
 ```
 
-Offline render: `vortex-render input.wav output.wav [morph 0..1] [wet 0..1]`. Input must be mono or stereo PCM 16/24/32-bit or IEEE float32; output is PCM16. The first CLI currently requires stereo.
+`vortex-render input.wav output.wav [morph 0..1] [wet 0..1]` performs an offline render. Input accepts mono or stereo PCM 16/24/32-bit or IEEE float32; the renderer currently requires stereo and writes PCM16.
+
+On Windows, `vortex-play input.wav` loops stereo 44.1 or 48 kHz audio through the default output. Use `[`/`]` or `-`/`+` to adjust morph, `0`–`9` to set its position, and `Q` to stop. This is a keyboard-controlled proof of concept, not the final GUI.
 
 ## Research boundaries
 

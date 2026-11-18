@@ -8,6 +8,7 @@ public:
     void process(float* interleaved_stereo, unsigned frames, const MorphParams& params);
 private:
     unsigned rate_=48000, cursor_=0;
+    float morph_current_=0.5f;
     std::vector<float> left_, right_;
 };
 }
