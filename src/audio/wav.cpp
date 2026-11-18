@@ -2,18 +2,23 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <stdexcept>
 
 namespace vortex {
 namespace {
+std::filesystem::path utf8_path(const std::string& value) {
+    const auto* begin=reinterpret_cast<const char8_t*>(value.data());
+    return std::filesystem::path(std::u8string(begin,begin+value.size()));
+}
 std::uint16_t u16(const unsigned char* p) { return std::uint16_t(p[0] | (p[1] << 8)); }
 std::uint32_t u32(const unsigned char* p) { return std::uint32_t(p[0]) | (std::uint32_t(p[1]) << 8) | (std::uint32_t(p[2]) << 16) | (std::uint32_t(p[3]) << 24); }
 void put16(std::ostream& o, std::uint16_t x) { char b[2]{char(x), char(x >> 8)}; o.write(b, 2); }
 void put32(std::ostream& o, std::uint32_t x) { char b[4]{char(x), char(x >> 8), char(x >> 16), char(x >> 24)}; o.write(b, 4); }
 }
 AudioBuffer read_wav(const std::string& path) {
-    std::ifstream f(path, std::ios::binary); if (!f) throw std::runtime_error("cannot open input WAV");
+    std::ifstream f(utf8_path(path), std::ios::binary); if (!f) throw std::runtime_error("cannot open input WAV");
     unsigned char h[12]; f.read(reinterpret_cast<char*>(h), 12);
     if (f.gcount()!=12 || std::memcmp(h,"RIFF",4) || std::memcmp(h+8,"WAVE",4)) throw std::runtime_error("not a RIFF/WAVE file");
     std::uint16_t format=0, channels=0, bits=0; std::uint32_t rate=0; std::vector<unsigned char> data;
@@ -42,7 +47,7 @@ AudioBuffer read_wav(const std::string& path) {
 void write_wav(const std::string& path,const AudioBuffer& a) {
     if ((a.channels!=1 && a.channels!=2) || !a.sample_rate || a.samples.size()%a.channels) throw std::runtime_error("invalid audio buffer");
     if(a.samples.size() > (0xffffffffu-36)/2) throw std::runtime_error("WAV too large");
-    std::ofstream f(path,std::ios::binary); if(!f) throw std::runtime_error("cannot open output WAV");
+    std::ofstream f(utf8_path(path),std::ios::binary); if(!f) throw std::runtime_error("cannot open output WAV");
     const auto bytes=std::uint32_t(a.samples.size()*2);
     f.write("RIFF",4); put32(f,36+bytes); f.write("WAVEfmt ",8); put32(f,16); put16(f,1); put16(f,a.channels); put32(f,a.sample_rate); put32(f,a.sample_rate*a.channels*2); put16(f,a.channels*2); put16(f,16); f.write("data",4); put32(f,bytes);
     for(float s:a.samples) { float c=std::clamp(std::isfinite(s)?s:0.0f,-1.0f,0.999969f); put16(f,std::uint16_t(std::int16_t(std::lrint(c*32768.0f)))); }

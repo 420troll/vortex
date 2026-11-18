@@ -12,4 +12,4 @@ ctest --preset windows-release
 
 Build outputs go under ignored `build/`. The preset disables automatic vcpkg MSBuild integration for this dependency-free target. The native Windows build should use a Windows filesystem path; building through a WSL UNC path produces Visual Studio path warnings.
 
-`vortex-play` uses the Windows SDK's WinMM `waveOut` API and requires no additional library. It currently uses the default output device and has no device selector or graphical interface.
+The GUI executable is `build/windows-vs2026-x64/Release/TROLLfx-Vortex-Lab.exe`. It uses the Windows subsystem, so double-clicking opens a normal GUI window without a terminal. `vortex-play.exe` remains available as the console/debug player. Both use the Windows SDK's WinMM `waveOut` API and the default output device.

@@ -1,10 +1,10 @@
 # TROLLfx Vortex Lab
 
-An independent PC research prototype for stereo audio processing and evidence-led study of the Lexicon Vortex. Native DSP here is Vortex-inspired and is not original Lexicon firmware emulation.
+An independent PC research prototype for stereo audio processing and evidence-led study of the Lexicon Vortex. It includes a portable DSP library, WAV tools, a WinMM playback host, and a native Win32 GUI. DSP here is Vortex-inspired and is not original Lexicon firmware emulation.
 
 ## Current status
 
-The first milestone scaffold includes a dependency-free stereo WAV renderer and a small shared-state delay morph. The current engine is a functional DSP experiment, not a complete interface or real-time device player. The ROM archive is in local research only and is excluded from Git.
+The first playable GUI provides stereo WAV transport, continuous morphing, levels, output meters, and export. The effects remain a TROLLfx DSP experiment. The ROM archive is in local research only and excluded from Git.
 
 ## Build
 
@@ -18,7 +18,7 @@ ctest --preset windows-release
 
 `vortex-render input.wav output.wav [morph 0..1] [wet 0..1]` performs an offline render. Input accepts mono or stereo PCM 16/24/32-bit or IEEE float32; the renderer currently requires stereo and writes PCM16.
 
-On Windows, `vortex-play input.wav` loops stereo 44.1 or 48 kHz audio through the default output. Use `[`/`]` or `-`/`+` to adjust morph, `0`–`9` to set its position, and `Q` to stop. This is a keyboard-controlled proof of concept, not the final GUI.
+On Windows, double-click `TROLLfx-Vortex-Lab.exe` to launch the GUI without a terminal window. It opens stereo 44.1/48 kHz WAV files, provides Play/Pause/Stop/Loop, continuous A/B morph, wet/dry and input/output levels, stereo output meters, and WAV export. `vortex-play input.wav` remains available as a console/debug player.
 
 ## Research boundaries
 
