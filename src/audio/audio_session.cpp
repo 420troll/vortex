@@ -19,10 +19,12 @@ void AudioSession::set_source(AudioBuffer audio) {
     params_=MorphParams{};
     input_gain_=output_gain_=1.0f;
     loop_=true;
+    bypass_=false;
     position_=0;
     commands_.clear();
     position_snapshot_.store(0,std::memory_order_relaxed);
     morph_snapshot_.store(0.5f,std::memory_order_relaxed);
+    bypass_snapshot_.store(false,std::memory_order_relaxed);
     peak_left_.store(0,std::memory_order_relaxed);
     peak_right_.store(0,std::memory_order_relaxed);
     state_.store(TransportState::Stopped,std::memory_order_release);
@@ -51,6 +53,7 @@ void AudioSession::apply_commands() noexcept {
         case AudioCommandType::SetWet: params_.wet=std::clamp(command.value,0.0f,1.0f); break;
         case AudioCommandType::SetInputGain: input_gain_=std::clamp(command.value,0.0f,2.0f); break;
         case AudioCommandType::SetOutputGain: output_gain_=std::clamp(command.value,0.0f,2.0f); break;
+        case AudioCommandType::SetBypass: bypass_=command.value>=0.5f; bypass_snapshot_.store(bypass_,std::memory_order_relaxed); break;
         }
     }
 }
@@ -82,7 +85,7 @@ void AudioSession::render(float* output,unsigned frames) noexcept {
         ++position_;
     }
     if(position_>=total && !loop_) state_.store(TransportState::Stopped,std::memory_order_release);
-    if(active) engine_.process(output,active,params_);
+    if(active && !bypass_) engine_.process(output,active,params_);
     morph_snapshot_.store(engine_.current_morph(),std::memory_order_relaxed);
     float peak_l=0,peak_r=0;
     for(unsigned i=0;i<frames;++i) {
@@ -96,7 +99,7 @@ void AudioSession::render(float* output,unsigned frames) noexcept {
     position_snapshot_.store(position_,std::memory_order_relaxed);
 }
 
-AudioBuffer render_offline(const AudioBuffer& source,const MorphParams& params,float input_gain,float output_gain) {
+AudioBuffer render_offline(const AudioBuffer& source,const MorphParams& params,float input_gain,float output_gain,bool bypass) {
     if(source.channels!=2 || !source.sample_rate || source.samples.size()%2)
         throw std::invalid_argument("offline render requires valid stereo audio");
     AudioBuffer result=source;
@@ -107,7 +110,7 @@ AudioBuffer render_offline(const AudioBuffer& source,const MorphParams& params,f
         const auto count=std::min(AudioSession::max_block_frames,frames-start);
         auto* block=result.samples.data()+std::size_t(start)*2;
         for(unsigned i=0;i<count*2;++i) block[i]*=input_gain;
-        engine.process(block,count,params);
+        if(!bypass) engine.process(block,count,params);
         for(unsigned i=0;i<count*2;++i)
             block[i]=std::clamp(std::isfinite(block[i])?block[i]*output_gain:0.0f,-1.0f,1.0f);
         start+=count;

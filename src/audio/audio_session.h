@@ -8,7 +8,7 @@
 
 namespace vortex {
 enum class TransportState : std::uint8_t { Stopped, Playing, Paused };
-enum class AudioCommandType : std::uint8_t { Play, Pause, Stop, SetLoop, SetMorph, SetMorphTime, SetWet, SetInputGain, SetOutputGain };
+enum class AudioCommandType : std::uint8_t { Play, Pause, Stop, SetLoop, SetMorph, SetMorphTime, SetWet, SetInputGain, SetOutputGain, SetBypass };
 struct AudioCommand { AudioCommandType type{}; float value{}; };
 
 // Single producer (UI) / single consumer (audio worker), fixed-capacity queue.
@@ -57,22 +57,24 @@ public:
     float morph_position() const noexcept { return morph_snapshot_.load(std::memory_order_relaxed); }
     float peak_left() const noexcept { return peak_left_.load(std::memory_order_relaxed); }
     float peak_right() const noexcept { return peak_right_.load(std::memory_order_relaxed); }
+    bool bypassed() const noexcept { return bypass_snapshot_.load(std::memory_order_relaxed); }
 private:
     void apply_commands() noexcept;
     AudioBuffer source_;
     MorphEngine engine_;
     MorphParams params_{};
     float input_gain_=1.0f, output_gain_=1.0f;
-    bool loop_=true;
+    bool loop_=true, bypass_=false;
     std::size_t position_=0;
     SpscCommandQueue<command_capacity> commands_;
     std::atomic<TransportState> state_{TransportState::Stopped};
     std::atomic<std::size_t> position_snapshot_{0};
     std::atomic<float> morph_snapshot_{0.5f};
+    std::atomic<bool> bypass_snapshot_{false};
     std::atomic<float> peak_left_{0.0f}, peak_right_{0.0f};
 };
 
 AudioBuffer render_offline(const AudioBuffer& source, const MorphParams& params,
-                           float input_gain, float output_gain);
+                           float input_gain, float output_gain, bool bypass=false);
 void validate_realtime_audio(const AudioBuffer& source);
 }

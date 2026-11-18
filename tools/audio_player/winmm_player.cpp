@@ -19,7 +19,8 @@ int main(int argc,char** argv) try {
         throw std::runtime_error(output.error_message());
 
     float morph=0.5f;
-    std::cout<<"Looping. Morph [/] or +/-; keys 0-9 set position; P pauses/resumes; S stops; Q exits.\n";
+    bool bypass=false;
+    std::cout<<"Looping. Morph [/] or +/-; keys 0-9 set position; B toggles DSP bypass; P pauses/resumes; S stops; Q exits.\n";
     while(true) {
         if(output.failed()) throw std::runtime_error(output.error_message());
         if(_kbhit()) {
@@ -33,11 +34,12 @@ int main(int argc,char** argv) try {
                 const auto type=session.state()==vortex::TransportState::Playing?vortex::AudioCommandType::Pause:vortex::AudioCommandType::Play;
                 ok=session.post({type,1.0f});
             }
+            else if(key=='b'||key=='B') { bypass=!bypass; ok=session.post({vortex::AudioCommandType::SetBypass,bypass?1.0f:0.0f}); }
             if((key>='0'&&key<='9')||key=='+'||key==']'||key=='-'||key=='[')
                 ok=session.post({vortex::AudioCommandType::SetMorph,morph});
             else if(key=='s'||key=='S') ok=session.post({vortex::AudioCommandType::Stop,0.0f});
             if(!ok) std::cerr<<"Audio command queue full; change was not applied.\n";
-            std::cout<<"State: "<<int(session.state())<<"  Morph: "<<morph<<"\n";
+            std::cout<<"State: "<<int(session.state())<<"  Morph: "<<morph<<"  DSP bypass: "<<(bypass?"on":"off")<<"\n";
         }
         Sleep(5);
     }

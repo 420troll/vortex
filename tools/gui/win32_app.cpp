@@ -1,5 +1,6 @@
 #define NOMINMAX
 #include "audio/audio_session.h"
+#include "audio/pcm_format.h"
 #include "audio/winmm_output.h"
 #include <Windows.h>
 #include <commctrl.h>
@@ -15,7 +16,7 @@
 
 namespace {
 constexpr wchar_t kClassName[]=L"TROLLfxVortexLabWindow";
-constexpr int kOpen=100,kPlay=101,kPause=102,kStop=103,kLoop=104,kExport=105;
+constexpr int kOpen=100,kPlay=101,kPause=102,kStop=103,kLoop=104,kExport=105,kBypass=106;
 constexpr int kMorph=200,kTime=201,kWet=202,kInput=203,kOutput=204;
 constexpr int kProgressLeft=300,kProgressRight=301;
 constexpr UINT kExportFinished=WM_APP+1;
@@ -25,9 +26,9 @@ vortex::WinMmOutput g_output_device(g_session);
 HWND g_window=nullptr,g_status=nullptr,g_file=nullptr,g_position=nullptr,g_morph_value=nullptr;
 HWND g_time_value=nullptr,g_wet_value=nullptr,g_input_value=nullptr,g_output_value=nullptr;
 HWND g_morph_slider=nullptr,g_time_slider=nullptr,g_wet_slider=nullptr,g_input_slider=nullptr,g_output_slider=nullptr;
-HWND g_left_meter=nullptr,g_right_meter=nullptr,g_loop_box=nullptr;
+HWND g_left_meter=nullptr,g_right_meter=nullptr,g_loop_box=nullptr,g_bypass_box=nullptr,g_diagnostics=nullptr;
 bool g_loaded=false,g_morph_dirty=false,g_time_dirty=false,g_wet_dirty=false,g_input_dirty=false,g_output_dirty=false;
-bool g_loop=true,g_exporting=false;
+bool g_loop=true,g_bypass=false,g_exporting=false;
 float g_morph=0.5f,g_morph_time=25.0f,g_wet=0.35f,g_input=1.0f,g_output=1.0f;
 float g_meter_left=0.0f,g_meter_right=0.0f;
 std::thread g_export_thread;
@@ -106,9 +107,17 @@ void choose_file() {
         g_output_device.shutdown();
         g_session.set_source(std::move(audio));
         g_loaded=true;
+        g_loop=true; g_bypass=false; g_morph=0.5f; g_morph_time=25.0f; g_wet=0.35f; g_input=1.0f; g_output=1.0f;
+        g_morph_dirty=g_time_dirty=g_wet_dirty=g_input_dirty=g_output_dirty=false;
         SetWindowTextW(g_file,path);
+        SendMessageW(g_loop_box,BM_SETCHECK,BST_CHECKED,0); SendMessageW(g_bypass_box,BM_SETCHECK,BST_UNCHECKED,0);
         SendMessageW(g_morph_slider,TBM_SETPOS,TRUE,500);
-        g_morph=0.5f; g_morph_dirty=true; flush_controls();
+        SendMessageW(g_time_slider,TBM_SETPOS,TRUE,25); SendMessageW(g_wet_slider,TBM_SETPOS,TRUE,35);
+        SendMessageW(g_input_slider,TBM_SETPOS,TRUE,100); SendMessageW(g_output_slider,TBM_SETPOS,TRUE,100);
+        post(vortex::AudioCommandType::SetLoop,1.0f); post(vortex::AudioCommandType::SetBypass,0.0f);
+        post(vortex::AudioCommandType::SetMorph,g_morph); post(vortex::AudioCommandType::SetMorphTime,g_morph_time);
+        post(vortex::AudioCommandType::SetWet,g_wet); post(vortex::AudioCommandType::SetInputGain,g_input); post(vortex::AudioCommandType::SetOutputGain,g_output);
+        update_control_text();
         set_status(L"Ready — press Play.");
     } catch(const std::exception& error) {
         const auto message=utf8_to_wide(error.what());
@@ -127,14 +136,15 @@ void export_file() {
     const auto filename=wide_to_utf8(path);
     const vortex::MorphParams params{g_morph,g_morph_time,g_wet};
     const float input=g_input,output=g_output;
+    const bool bypass=g_bypass;
     const auto* source=&g_session.source();
     g_exporting=true; EnableWindow(GetDlgItem(g_window,kOpen),FALSE); EnableWindow(GetDlgItem(g_window,kExport),FALSE);
     set_status(L"Exporting WAV in background...");
     try {
-        g_export_thread=std::thread([source,filename,params,input,output]() {
+        g_export_thread=std::thread([source,filename,params,input,output,bypass]() {
             bool success=false; std::wstring message;
             try {
-                const auto rendered=vortex::render_offline(*source,params,input,output);
+                const auto rendered=vortex::render_offline(*source,params,input,output,bypass);
                 vortex::write_wav(filename,rendered);
                 success=true; message=L"WAV export complete.";
             } catch(const std::exception& error) {
@@ -157,7 +167,8 @@ void refresh_status() {
     }
     if(!g_loaded) return;
     const auto state=g_session.state();
-    const auto frames=g_session.position_frames(),total=g_session.total_frames();
+    const auto frames=g_output_device.running()?g_output_device.played_position_frames():g_session.position_frames();
+    const auto total=g_session.total_frames();
     const auto rate=g_session.source().sample_rate;
     const auto seconds=rate?frames/rate:0,total_seconds=rate?total/rate:0;
     wchar_t text[160];
@@ -170,6 +181,18 @@ void refresh_status() {
     g_meter_right=std::max(g_session.peak_right(),g_meter_right*0.88f);
     SendMessageW(g_left_meter,PBM_SETPOS,WPARAM(std::clamp(int(g_meter_left*100),0,100)),0);
     SendMessageW(g_right_meter,PBM_SETPOS,WPARAM(std::clamp(int(g_meter_right*100),0,100)),0);
+    wchar_t diagnostics[256];
+    swprintf_s(diagnostics,L"Input %u Hz / 2 ch | WinMM requested %u Hz 2ch PCM16 | buffer %u fr/%u B | queued %u/%u | queue-empty %llu | render %llu us (max %llu) | frames sent/done %llu/%llu | device error %u",
+        rate, g_output_device.output_sample_rate(), vortex::WinMmOutput::buffer_frames(),
+        vortex::pcm16_stereo_buffer_bytes(vortex::WinMmOutput::buffer_frames()),
+        g_output_device.queued_buffers(),vortex::WinMmOutput::buffer_count(),
+        static_cast<unsigned long long>(g_output_device.underrun_count()),
+        static_cast<unsigned long long>(g_output_device.last_render_microseconds()),
+        static_cast<unsigned long long>(g_output_device.max_render_microseconds()),
+        static_cast<unsigned long long>(g_output_device.submitted_frames()),
+        static_cast<unsigned long long>(g_output_device.completed_frames()),
+        g_output_device.error_code());
+    SetWindowTextW(g_diagnostics,diagnostics);
 }
 void create_controls(HWND hwnd) {
     control(hwnd,L"BUTTON",L"Open WAV...",BS_PUSHBUTTON,24,22,120,34,kOpen);
@@ -178,6 +201,7 @@ void create_controls(HWND hwnd) {
     control(hwnd,L"BUTTON",L"Stop",BS_PUSHBUTTON,336,22,80,34,kStop);
     g_loop_box=control(hwnd,L"BUTTON",L"Loop",BS_AUTOCHECKBOX,438,27,80,26,kLoop);
     SendMessageW(g_loop_box,BM_SETCHECK,BST_CHECKED,0);
+    g_bypass_box=control(hwnd,L"BUTTON",L"DSP Bypass",BS_AUTOCHECKBOX,526,27,120,26,kBypass);
     control(hwnd,L"BUTTON",L"Export WAV...",BS_PUSHBUTTON,810,22,140,34,kExport);
     g_file=control(hwnd,L"STATIC",L"No file loaded",SS_LEFT|SS_PATHELLIPSIS,24,68,926,25);
     label(hwnd,L"PLAYBACK",24,106,130,24);
@@ -197,6 +221,7 @@ void create_controls(HWND hwnd) {
     label(hwnd,L"RIGHT",24,568,55,24); g_right_meter=control(hwnd,PROGRESS_CLASSW,L"",PBS_SMOOTH,82,568,868,22,kProgressRight);
     SendMessageW(g_left_meter,PBM_SETRANGE32,0,100); SendMessageW(g_right_meter,PBM_SETRANGE32,0,100);
     g_status=control(hwnd,L"STATIC",L"Open a stereo WAV file to begin.",SS_LEFT,24,606,926,26);
+    g_diagnostics=control(hwnd,L"STATIC",L"Audio diagnostics appear after a WAV is loaded.",SS_LEFT,24,634,950,24);
     update_control_text();
 }
 LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM wparam,LPARAM lparam) {
@@ -216,6 +241,9 @@ LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM wparam,LPARAM lparam)
         case kLoop:
             g_loop=SendMessageW(g_loop_box,BM_GETCHECK,0,0)==BST_CHECKED;
             post(vortex::AudioCommandType::SetLoop,g_loop?1.0f:0.0f); return 0;
+        case kBypass:
+            g_bypass=SendMessageW(g_bypass_box,BM_GETCHECK,0,0)==BST_CHECKED;
+            post(vortex::AudioCommandType::SetBypass,g_bypass?1.0f:0.0f); return 0;
         }
         break;
     case WM_HSCROLL: {

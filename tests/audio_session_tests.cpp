@@ -1,4 +1,6 @@
 #include "audio/audio_session.h"
+#include "audio/buffer_ownership.h"
+#include "audio/pcm_format.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -17,9 +19,72 @@ vortex::AudioBuffer sample_audio(std::size_t frames) {
     }
     return audio;
 }
+void verify_one_second_passthrough(std::uint32_t rate) {
+    vortex::AudioBuffer generated{rate,2,{}};
+    generated.samples.resize(std::size_t(rate)*2);
+    for(std::uint32_t frame=0;frame<rate;++frame) {
+        const float value=0.6f*std::sin(6.28318530718f*440.0f*float(frame)/float(rate));
+        generated.samples[2*frame]=value; generated.samples[2*frame+1]=-value;
+    }
+    const auto path=rate==44100?"vortex-one-second-44100.wav":"vortex-one-second-48000.wav";
+    vortex::write_wav(path,generated);
+    auto source=vortex::read_wav(path); std::remove(path);
+    require(source.sample_rate==rate && source.channels==2 && source.samples.size()==std::size_t(rate)*2,"one-second stereo WAV metadata and frame count");
+    vortex::AudioSession session; session.set_source(std::move(source));
+    require(session.post({vortex::AudioCommandType::SetLoop,0.0f}),"queue non-looping baseline");
+    require(session.post({vortex::AudioCommandType::SetBypass,1.0f}),"queue DSP bypass");
+    require(session.post({vortex::AudioCommandType::Play,1.0f}),"queue baseline Play");
+    std::array<float,256*2> output{};
+    std::size_t counted_frames=0,previous=0;
+    unsigned blocks=0;
+    while(session.state()!=vortex::TransportState::Stopped || session.position_frames()<session.total_frames()) {
+        const auto start=session.position_frames();
+        session.render(output.data(),256);
+        const auto end=session.position_frames();
+        require(end>=start,"non-looping frame cursor must not wrap");
+        const auto active=end-start;
+        for(std::size_t i=0;i<active;++i) {
+            const auto frame=start+i;
+            require(std::abs(output[i*2]-session.source().samples[frame*2])<1e-7f,"bypass left channel changed");
+            require(std::abs(output[i*2+1]-session.source().samples[frame*2+1])<1e-7f,"bypass right channel changed");
+        }
+        counted_frames+=active; previous=end;
+        require(++blocks<rate/128+4,"one-second baseline did not reach EOF");
+    }
+    (void)previous;
+    require(counted_frames==rate,"one-second baseline frame count");
+    const double duration=double(counted_frames)/double(rate);
+    require(std::abs(duration-1.0)<1e-12,"one-second WAV duration calculation");
+    require(session.bypassed(),"DSP bypass state should be active");
+}
 }
 
 int main() try {
+    constexpr auto format_441=vortex::pcm16_stereo_format(44100);
+    constexpr auto format_480=vortex::pcm16_stereo_format(48000);
+    require(format_441.channels==2 && format_441.bits_per_sample==16 && format_441.block_align==4 && format_441.average_bytes_per_second==176400,"44.1 kHz WinMM PCM format math");
+    require(format_480.channels==2 && format_480.bits_per_sample==16 && format_480.block_align==4 && format_480.average_bytes_per_second==192000,"48 kHz WinMM PCM format math");
+    require(vortex::pcm16_stereo_buffer_bytes(256)==1024,"256 stereo frames must occupy 1,024 bytes");
+    require(vortex::pcm16_stereo_buffer_bytes(1024)==4096,"1,024 stereo frames must occupy 4,096 bytes");
+    verify_one_second_passthrough(44100);
+    verify_one_second_passthrough(48000);
+
+    vortex::BufferOwnership<3> owners;
+    require(owners.queued_count()==0 && owners.submit(0) && owners.submit(1) && owners.submit(2),"initial multi-buffer queue");
+    require(owners.queued_count()==3 && !owners.submit(1),"WinMM-owned buffers cannot be overwritten");
+    require(owners.complete(1) && owners.queued_count()==2 && !owners.complete(1),"only completed buffer becomes reusable");
+    require(owners.submit(1) && owners.queued_count()==3,"completed buffer can be requeued");
+
+    vortex::AudioSession loop_baseline;
+    loop_baseline.set_source({48000,2,{0.25f,-0.25f,0.5f,-0.5f}});
+    loop_baseline.post({vortex::AudioCommandType::SetBypass,1.0f});
+    loop_baseline.post({vortex::AudioCommandType::SetLoop,1.0f});
+    loop_baseline.post({vortex::AudioCommandType::Play,1.0f});
+    float loop_output[10]{}; loop_baseline.render(loop_output,5);
+    const float expected_loop[10]{0.25f,-0.25f,0.5f,-0.5f,0.25f,-0.25f,0.5f,-0.5f,0.25f,-0.25f};
+    for(unsigned i=0;i<10;++i) require(loop_output[i]==expected_loop[i],"bypass loop boundary must neither repeat nor skip samples");
+    require(loop_baseline.position_frames()==1,"looping file cursor wraps in frames");
+
     vortex::SpscCommandQueue<2> queue;
     require(queue.push({vortex::AudioCommandType::SetMorph,0.2f}),"first bounded-queue push");
     require(queue.push({vortex::AudioCommandType::SetMorph,0.8f}),"second bounded-queue push");
