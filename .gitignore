@@ -1,0 +1,10 @@
+/build/
+/out/
+/research_local/**
+!/research_local/.gitkeep
+*.wav
+*.bin
+*.rom
+*.rar
+__pycache__/
+*.pyc
