@@ -1,17 +1,17 @@
 # ROM forensics
 
-## Archive availability
+## Archive verification
 
-- **CONFIRMED** archive listing includes `Lexicon Vortex 1.1 (27C512).rar` (DBWBP archive directory).
-- **CONFIRMED** retrieved archive size: 12,965 bytes.
-- **CONFIRMED** archive SHA-256: `8afe37707ce163f55285a755ba275ec5b3029cb630bb48028c67c2d4b9894462`.
-- Local path: `research_local/vortex-1.1-27c512.rar` (ignored by Git).
-- **UNKNOWN** extracted file name, exact 65,536-byte size, and firmware SHA-256. RAR4 extraction tool was unavailable during this pass.
+- **CONFIRMED** local archive: `/home/gamer/vortex/research_local/vortex-1.1-27c512.rar` (outside this Windows worktree and ignored by Git).
+- **CONFIRMED** archive size: 12,965 bytes; format: RAR v4, Windows-origin archive (`file` output).
+- **CONFIRMED** SHA-256: `8afe37707ce163f55285a755ba275ec5b3029cb630bb48028c67c2d4b9894462` (matches the previously recorded value).
+- **UNKNOWN** extracted image name, size, SHA-256, version marker, boot page contents, instruction count, and ROM offsets.
+- Extraction was attempted with the available Linux/Windows command paths. No `unrar`, `7z`, `unar`, or `bsdtar` executable/library is available. `powershell.exe` fails with `UtilBindVsockAnyPort` before it can run. Archive bytes were not modified.
 
 ## Structure findings
 
-- **UNKNOWN** whether extracted image has valid ADSP-2105 boot data.
-- **UNKNOWN** executable start, bank mapping, code/data/table regions, parameter tables, dispatch structure, internal program-RAM copy range, and algorithm/morph routines.
-- No firmware offsets or instruction addresses are asserted until the image is extracted and boot encoding is verified.
+- The archive listing is documented in the prior research record as `Lexicon Vortex 1.1 (27C512).rar`; this session verifies the actual local archive hash, not its contents.
+- ADSP-2105 boot packing is established at the architecture level: boot data carries a length byte and 24-bit program words packed from three of every four byte lanes. See [ADSP2105_BOOT.md](ADSP2105_BOOT.md).
+- No image-specific boot values, executable regions, constants, ROM-bank transitions, DSP initialization, or algorithms are claimed.
 
-Do not commit extracted ROM bytes or reproduce proprietary contents in documentation.
+The archive and any extracted firmware are proprietary. Do not commit or publish them. `tools/rom_inspector/decode_adsp_boot.py` accepts a locally extracted 4096-byte page; it prints words, not disassembly.
