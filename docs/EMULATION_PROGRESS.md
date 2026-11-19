@@ -2,38 +2,30 @@
 
 ## Session status
 
-- Branch: `codex/original-adsp-emulation`.
-- Firmware archive: 12,965 bytes; SHA-256 matches the recorded hash.
-- Extraction: blocked; no local RAR utility and Windows PowerShell invocation fails through WSL.
-- Boot contract: ADSP-2105 page format confirmed from Analog Devices data sheet and MAME loader. Vortex image-specific boot contents remain unknown.
-- Added boot-page parser and synthetic tests; no firmware disassembly generated.
-- REA: its MCP tools are unavailable in this session.
-- MAME integration: source reviewed online; no core built or machine driver implemented.
-- Firmware execution: **not achieved**. No original instruction execution, CPU trace, ROM-bank event, hardware access trace, or audio output is claimed.
-- Virtual hardware: none implemented.
+- Work is isolated on branch `codex/adsp2105-original-execution`; the Windows worktree and its uncommitted GUI/audio changes were not modified.
+- Local ROM: 65,536 bytes, SHA-256 `1e79c704fbef8219b7fc53349064bc1afafd4287c3ca7442bb5587641a450892`. The file remains under ignored `research_local/` and is not included in Git.
+- Page 0 is 1,024 24-bit instructions, packed in the format used by MAME's ADSP boot loader. MAME's own disassembler has produced a complete local annotated listing at ignored `research_local/vortex-page0-mame.asm`.
+- Reset starts at processor `PC=0`. The first word `0x1804EF` is decoded as `JUMP $004E`; therefore the first candidate initialization routine begins at `PC=0x004E`. PC 1 is not the next executed instruction following this direct jump.
+- The remaining first words decode as `AY0 = $0020` (PC 1), `JUMP $0009` (PC 2), and `AY0 = $0200` (PC 3). MAME recognizes all four encodings; only PC 0 is on the reset path without another control-flow edge.
+- **Original ROM execution in MAME is not yet achieved.** The Vortex machine driver compiles against the pinned MAME ADSP core, but the full MAME executable has not linked in this container. Therefore there is no genuine ROM instruction trace, observed CPU state, cycle trace, or reached hardware-access blocker.
+- REA tools were not available. No ADSP instruction was executed in REA.
 
 ## Verification performed
 
-Archive verification command:
+- ROM size and SHA-256 were checked against the user-provided values.
+- `tools/mame/build_disassembler.sh` compiled MAME's actual ADSP disassembler at commit `d19b5702bdbd1e6c14ecd522e9236154468fc4ef`; it decoded all 1,024 page-0 words with ROM offsets and processor word addresses.
+- The focused Vortex driver and ADSP-2100 CPU/disassembler sources compiled. The MAME executable link failed because this environment lacks a complete SDL/X11 runtime development dependency chain. This is a build-environment blocker; no trace was generated.
+- `python3 -m unittest tests.test_adsp_boot tests.test_rom_image -v`: 8 synthetic tests passed. These check parser and page-packing behavior, not the proprietary ROM or MAME execution.
+- `git diff --check`: clean.
 
-```sh
-stat -c '%n %s bytes' /home/gamer/vortex/research_local/vortex-1.1-27c512.rar
-sha256sum /home/gamer/vortex/research_local/vortex-1.1-27c512.rar
-```
+## First unresolved board dependency
 
-Synthetic parser test:
+Static analysis of the reset path at `PC=0x004E` shows writes to system control MMR `DM(0x3FFF)`, wait-state MMR `DM(0x3FFE)`, then `DM(0x1F80)` at `PC=0x0053`, followed by a display write at `DM(0x1800)` at `PC=0x0055`. The service-manual map documents the display and nearby EPROM/bank-select ranges but does not identify `0x1F80`. Thus `DM(0x1F80)` is the first *statically identified candidate* unresolved board dependency, not an observed execution blocker.
 
-```sh
-python3 -m unittest tests.test_adsp_boot -v
-```
+## Next minimum work
 
-The parser test validates packing mechanics only. No ROM integrity-after-extraction, CPU execution, memory, banking, DRAM, interrupt, codec, deterministic-run, or performance test can yet pass meaningfully because no Vortex image or MAME harness is available.
+1. Complete the pinned MAME build with SDL/X11 development dependencies, or use a headless MAME build configuration that still includes the debugger.
+2. Run the local ROM script twice and capture an actual trace, MAME CPU state, cycles, and first unknown access. Validate PM contents against the 1,024-word listing.
+3. Confirm `DM(0x1F80)` semantics from schematics or trace and implement only the minimum necessary mapping before proceeding to later initialization.
 
-## Blockers and next action
-
-1. Provide a RAR4 extraction executable to this environment or extract the archive locally into the ignored `research_local` directory. Keep firmware bytes out of Git.
-2. Parse page 0 and compare its word count/byte packing with MAME and a known ADSP instruction decoder.
-3. Build a minimal MAME driver, trace reset/boot and unknown accesses, then implement only hardware required by observed initialization.
-4. After stable execution and SPORT/codec behavior, feed a known signal and capture output; only then investigate A/B morph.
-
-The highest-value immediate technical step is extracting the verified archive. The critical original-code execution milestone remains open.
+Do not infer normal Vortex startup or authentic audio from instruction decoding alone.

@@ -2,20 +2,34 @@
 
 ## Confirmed architecture behavior
 
-The Analog Devices ADSP-2105 data sheet describes a 32 KiB byte-wide boot space split into eight 4 KiB pages. With `MMAP=0`, reset automatically boots page 0. The boot interface packs bytes into 24-bit program words and loads on-chip program RAM. The chip has 1,024 × 24-bit program words and 512 × 16-bit data words. The data sheet describes the boot page length byte as a count in groups of eight program words.
+The Analog Devices ADSP-2105 data sheet describes a 32 KiB byte-wide boot space split into eight 4 KiB pages. With `MMAP=0`, reset automatically boots page 0 into internal PM addresses `0x0000–0x03ff`; the reset vector is `PC=0x0000`. The processor has 1,024 × 24-bit program words and 512 × 16-bit data words. The page-length byte selects a count in groups of eight words.
 
-MAME's current `adsp2100.cpp` `load_boot_data` implementation computes `(srcdata[3] + 1) * 8` words, then forms each word from `srcdata[i*4+0..2]` as big-endian 24-bit instruction data. Its ADSP-2105 program map places internal program RAM at `0x0000–0x03ff` under the boot mapping. The first execution address is therefore treated as `PC=0` by the core reset/boot path; the Vortex-specific reset wiring and mode pin have not yet been checked against the schematic.
+MAME's ADSP core resets `PC` to zero and exposes `load_boot_data`, which computes `(srcdata[3] + 1) * 8` words and packs bytes 0–2 of each four-byte unit into one 24-bit word. The ADSP core does **not** automatically call this helper on reset. The harness copies page 0 into the driver's `0x0000–0x03ff` program RAM using MAME's helper to represent the ADSP hardware boot transfer. The Vortex `MMAP` pin and 64 KiB EPROM bank wiring remain to be checked against schematics.
+
+## Page 0 disassembly
+
+MAME's ADSP disassembler produces these first words, with ROM file offsets and processor word addresses:
+
+| File offset | PC | Word | Instruction |
+|---:|---:|---:|---|
+| `0x0000` | `0x0000` | `0x1804EF` | `JUMP $004E` |
+| `0x0004` | `0x0001` | `0x400204` | `AY0 = $0020` |
+| `0x0008` | `0x0002` | `0x18009F` | `JUMP $0009` |
+| `0x000C` | `0x0003` | `0x402004` | `AY0 = $0200` |
+
+All four encodings are recognized by MAME's decoder as ADSP instructions. Their control-flow reachability differs: the reset branch at PC 0 targets `0x004E`; MAME applies this direct jump immediately, so PC 1 is decoded but is not the next executed instruction. The full annotated listing for all 1024 words is available locally at ignored `research_local/vortex-page0-mame.asm`.
 
 References: [Analog Devices ADSP-2105 data sheet](https://www.analog.com/media/en/technical-documentation/data-sheets/adsp-2105.pdf); [MAME ADSP-2100 core](https://github.com/mamedev/mame/blob/master/src/devices/cpu/adsp2100/adsp2100.cpp).
 
 ## Local parser
 
-`tools/rom_inspector/decode_adsp_boot.py` implements this page packing and prints program address, page-relative ROM byte offset, and raw 24-bit word. It deliberately does not label words as valid instructions: MAME's ADSP disassembler has not been run against the Vortex image. A synthetic unit test checks packing and length handling. No firmware page was available to parse during this session.
+`tools/rom_inspector/rom_image.py` validates the user-provided 64 KiB image size and SHA-256 and decodes one aligned page. Five public unit tests use independent synthetic fixtures. `tools/mame/build_disassembler.sh` compiles MAME's own `2100dasm.cpp` from pinned source to create the annotated local listing.
 
 ## Vortex-specific unknowns
 
 - Whether the 27C512 is physically wired as a direct 64 KiB window, how its 32 KiB boot-visible space is banked, and what A12/A14/A15 latches do during execution.
-- Whether reset uses the default boot path and whether the image begins at archive offset zero without a header or transform.
-- Actual length byte, image entry sequence, loaded-word count, reachable external program regions, and any subsequent software boot-page load.
+- Whether the physical board straps `MMAP=0`, or how it maps the 64 KiB EPROM onto the 32 KiB ADSP boot window.
+- Whether the image's nine plausible 4 KiB page headers represent boot pages, bank contents, or another organization.
+- Which PC ranges are reachable from normal reset and any later software boot-page load.
 
-Thus, boot format is confirmed for the processor family, but no Vortex boot sequence or entry point has been verified from firmware.
+The processor's reset behavior and the image's reset-vector jump are verified separately. The first candidate firmware initialization entry is PC `0x004E`; actual execution through the MAME core is pending the harness build.
