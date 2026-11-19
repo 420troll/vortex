@@ -32,6 +32,7 @@ function createProjects_mame_tiny(_target, _subtarget)
     uuid(os.uuid("drv-mame-tiny"))
     addprojectflags()
     precompiledheaders_novs()
+    resincludedirs { MAME_DIR .. "scripts/resources/windows/mame" }
     includedirs {
         MAME_DIR .. "src/osd", MAME_DIR .. "src/emu", MAME_DIR .. "src/devices",
         MAME_DIR .. "src/mame/shared", MAME_DIR .. "src/lib", MAME_DIR .. "src/lib/util",
@@ -47,6 +48,22 @@ end
 
     tiny_lst = mame / "src/mame/tiny.lst"
     tiny_lst.write_text("@source:vortex/vortex_exec.cpp\nvortexexec\n")
+
+    # Keep the Windows OSD's null audio backend only.  This avoids compiling
+    # physical WASAPI/XAudio2 device support into the headless execution build.
+    modules_file = mame / "scripts/src/osd/modules.lua"
+    modules_text = modules_file.read_text()
+    for source in ("mmdevice_helpers.cpp", "mmdevice_helpers.h", "wasapi_sound.cpp", "xaudio2_sound.cpp"):
+        line = f'\t\tMAME_DIR .. "src/osd/modules/sound/{source}",\n'
+        modules_text = modules_text.replace(line, "")
+    modules_file.write_text(modules_text)
+
+    osd_common = mame / "src/osd/modules/lib/osdobj_common.cpp"
+    common_text = osd_common.read_text()
+    for module in ("SOUND_WASAPI", "SOUND_XAUDIO2"):
+        line = f"\tREGISTER_MODULE(m_mod_man, {module});\n"
+        common_text = common_text.replace(line, "")
+    osd_common.write_text(common_text)
 
 
 def main() -> None:

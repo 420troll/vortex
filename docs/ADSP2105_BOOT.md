@@ -32,4 +32,4 @@ References: [Analog Devices ADSP-2105 data sheet](https://www.analog.com/media/e
 - Whether the image's nine plausible 4 KiB page headers represent boot pages, bank contents, or another organization.
 - Which PC ranges are reachable from normal reset and any later software boot-page load.
 
-The processor's reset behavior and the image's reset-vector jump are verified separately. The first candidate firmware initialization entry is PC `0x004E`; actual execution through the MAME core is pending the harness build.
+The processor's reset behavior and the image's reset-vector jump are verified separately. Actual execution through MAME's ADSP-2105 core has now been observed in a native Windows build: its debugger trace starts at PC `0x004E`, immediately after the reset transfer and vector branch. The first executed routine writes `DM(0x3FFF)`, `DM(0x3FFE)`, then the service-manual codec reset alias `DM(0x1F80)`. The existing trace does not yet capture PC 0 itself, so the branch target is directly decoded and consistent with observed entry PC, but not yet recorded as a PC0 trace row.

@@ -43,6 +43,7 @@ private:
 	required_shared_ptr<u32> m_boot_pm;
 	required_shared_ptr<u16> m_dmram;
 	std::array<u16, 0x400> m_mmr;
+	bool m_codec_reset_asserted = false;
 };
 
 
@@ -107,7 +108,15 @@ u16 vortex_exec_state::external_dm_r(offs_t offset)
 
 void vortex_exec_state::external_dm_w(offs_t offset, u16 data)
 {
-	logerror("UNMAPPED external DM write PC=%04X address=%04X data=%04X ignored\n", current_pc(), unsigned(offset), data);
+	unsigned const address = unsigned(offset);
+	if (address == 0x1f80 || address == 0x1fc0)
+	{
+		m_codec_reset_asserted = (address == 0x1f80);
+		logerror("Vortex CS4216 codec reset %s PC=%04X DM=%04X data=%04X (codec not modeled)\n",
+			m_codec_reset_asserted ? "asserted" : "released", current_pc(), address, data);
+		return;
+	}
+	logerror("UNMAPPED external DM write PC=%04X address=%04X data=%04X ignored\n", current_pc(), address, data);
 }
 
 

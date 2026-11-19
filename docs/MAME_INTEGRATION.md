@@ -2,7 +2,7 @@
 
 ## Chosen approach
 
-The prototype is a small MAME machine driver so instruction execution, address spaces, device scheduling, and debugger tracing stay inside MAME. It is added to MAME's `tiny` subtarget by `tools/mame/prepare_mame.py`; MAME itself is not vendored. The execution build pins upstream commit `d19b5702bdbd1e6c14ecd522e9236154468fc4ef`.
+The prototype is a small MAME machine driver so instruction execution, address spaces, device scheduling, and debugger tracing stay inside MAME. It is added to MAME's `tiny` subtarget by `tools/mame/prepare_mame.py`; MAME itself is not vendored. The execution build pins upstream commit `d19b5702bdbd1e6c14ecd522e9236154468fc4ef`. A Windows x64 Release console executable has been built with the installed VS18/MSVC v145 toolset and MAME's bundled Genie VS project generator. The local build disables WASAPI and XAudio2 and uses `-video none -sound none`.
 
 The driver source is `tools/mame/vortex_exec.cpp`. It:
 
@@ -11,8 +11,21 @@ The driver source is `tools/mame/vortex_exec.cpp`. It:
 - Uses MAME's `load_boot_data` helper at machine reset to transfer page 0 into PM RAM, because the ADSP core resets `PC` but does not itself perform the hardware boot transfer.
 - Implements reset defaults for the ADSP DM wait-state register and write latches for the MMRs encountered during startup. These latches record values but do not model timer, SPORT, or wait-state effects.
 - Logs every access outside the modeled on-chip RAM/MMRs. Unmapped reads return explicit `0xffff` or `0xffffff` defaults and log the address and current instruction PC; unmapped writes are logged and ignored.
+- Handles the service-manual codec-reset aliases `DM(0x1F80)` (assert active-low reset) and `DM(0x1FC0)` (release reset) as logged latches. It does not emulate the CS4216.
 
 The external program/data mappings and the ROM bank latch remain unknown. No guessed bank behavior is installed. The CPU's on-chip memory map and boot mechanics are based on the ADSP-2105 datasheet; the Vortex data memory addresses are cross-checked against `HARDWARE_MAP.md`.
+
+## Windows build/run evidence
+
+The successful local executable is `C:\Users\Gamer\mame-vortex\mametiny.exe`; it reports MAME 0.289 and includes only the `vortexexec` tiny profile. The source tree and build output are separate from the application repository. The reproducible setup currently requires CMake-installed bundled Genie, native MSBuild, and native Python to generate MAME's version/driver/resource files; the final build instructions need a checked-in PowerShell wrapper. The currently verified debugger invocation is:
+
+```powershell
+& C:\Users\Gamer\mame-vortex\mametiny.exe vortexexec `
+  -rompath C:\Users\Gamer\mame-vortex\roms -video none -sound none `
+  -skip_gameinfo -debug -debugscript C:\Users\Gamer\mame-vortex\research_vortexexec\boot.script -log
+```
+
+The debugger script runs `step 128`, captures PC, MAME disassembly, selected registers and cycle fields, then exits. The first recorded instruction is at `0x004E`, because MAME has performed the page transfer and the reset branch before this debugger trace starts. It is not yet the requested `--rom/--cycles/--trace` CLI, and its trace has not yet been proven repeat-identical.
 
 ## Run locally
 
