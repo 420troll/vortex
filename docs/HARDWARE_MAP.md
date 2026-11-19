@@ -16,6 +16,8 @@ Evidence labels: **CONFIRMED** means directly stated in the service manual or su
 | `0x1000–0x1003` | External DRAM address-page writes | CONFIRMED from supplied manual-derived address table; latch bit details pending |
 | `0x1800` | Display register write | CONFIRMED |
 | `0x1801` | Low status read | CONFIRMED |
+| `0x1F80` | `CODEC_RST/` active-low codec reset assertion | CONFIRMED by service-manual printed page 4-3; observed executed write at PC `0x0053` |
+| `0x1FC0` | `CODEC_RST/` release alias | CONFIRMED by service-manual printed page 4-3 |
 | `0x1C01` | High status read | CONFIRMED |
 | `0x1C00 / 0x1C40` | Relay control | CONFIRMED |
 | `0x1C80 / 0x1CC0` | EPROM A12 control | CONFIRMED |
@@ -24,7 +26,7 @@ Evidence labels: **CONFIRMED** means directly stated in the service manual or su
 | `0x3400` | DRAM data access | CONFIRMED |
 | `0x3C00–0x3FFF` | Internal memory/register region | CONFIRMED; detailed decode pending |
 
-This is a starting transcription from the supplied research handoff, not a substitute for the complete manual table. Do not implement these as fully understood devices until the schematic and access timing are reviewed. Codec reset, ADC control, EEPROM clock/data, wait states, and program-memory mapping remain **UNKNOWN** here.
+This is a starting transcription from the supplied research handoff, not a substitute for the complete manual table. Do not implement these as fully understood devices until the schematic and access timing are reviewed. ADC control, EEPROM clock/data, wait states, and program-memory mapping remain **UNKNOWN**. The 128-instruction MAME run reaches the codec reset write and continues; the codec itself is not modeled.
 
 ## References to inspect next
 
