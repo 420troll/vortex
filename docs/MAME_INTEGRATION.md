@@ -1,51 +1,70 @@
 # MAME integration
 
-## Chosen approach
+## Core and machine driver
 
-The prototype is a small MAME machine driver so instruction execution, address spaces, device scheduling, and debugger tracing stay inside MAME. It is added to MAME's `tiny` subtarget by `tools/mame/prepare_mame.py`; MAME itself is not vendored. The execution build pins upstream commit `d19b5702bdbd1e6c14ecd522e9236154468fc4ef`. A Windows x64 Release console executable has been built with the installed VS18/MSVC v145 toolset and MAME's bundled Genie VS project generator. The local build disables WASAPI and XAudio2 and uses `-video none -sound none`.
+The emulator uses MAME 0.289 at source commit `d19b5702bdbd1e6c14ecd522e9236154468fc4ef`. The local `tiny` profile is prepared by `tools/mame/prepare_mame.py`; no MAME CPU code is copied or reimplemented. The driver in `tools/mame/vortex_exec.cpp` instantiates MAME's `adsp2105_device`, loads the first boot page with the core's `load_boot_data`, and provides bounded PM/DM spaces.
 
-The driver source is `tools/mame/vortex_exec.cpp`. It:
+The driver records on-chip MMR writes, board latch accesses, status reads, and unsupported memory accesses. The first unsupported external PM read asserts the core HALT input. This prevents execution of fabricated `0xFFFFFF` data as if it were valid firmware. Board external wait states and ROM bank translation remain to be implemented.
 
-- Registers an ADSP-2105 at the service-manual 10 MHz clock.
-- Maps the 1K PM boot RAM at `0x0000–0x03ff`, 512 words of DM RAM at `0x3800–0x39ff`, and bounds the CPU address spaces to 14 bits.
-- Uses MAME's `load_boot_data` helper at machine reset to transfer page 0 into PM RAM, because the ADSP core resets `PC` but does not itself perform the hardware boot transfer.
-- Implements reset defaults for the ADSP DM wait-state register and write latches for the MMRs encountered during startup. These latches record values but do not model timer, SPORT, or wait-state effects.
-- Logs every access outside the modeled on-chip RAM/MMRs. Unmapped reads return explicit `0xffff` or `0xffffff` defaults and log the address and current instruction PC; unmapped writes are logged and ignored.
-- Handles the service-manual codec-reset aliases `DM(0x1F80)` (assert active-low reset) and `DM(0x1FC0)` (release reset) as logged latches. It does not emulate the CS4216.
+The machine list has two systems:
 
-The external program/data mappings and the ROM bank latch remain unknown. No guessed bank behavior is installed. The CPU's on-chip memory map and boot mechanics are based on the ADSP-2105 datasheet; the Vortex data memory addresses are cross-checked against `HARDWARE_MAP.md`.
+- `vortexexec`: local user-supplied verified firmware. ROM bytes are never checked into Git.
+- `vortexsynthetic`: a no-dump ROM slot for public tests that generate their own 64 KiB synthetic firmware.
 
-## Windows build/run evidence
+The Windows Release executable was built natively with VS Community 18/MSVC v145 and Genie-generated VS2022 project files. The `tiny` profile contains only the Vortex driver and ADSP21XX CPU. WASAPI/XAudio2 modules are omitted. Run with `-video none -sound none`; no physical audio device or graphical window is used.
 
-The successful local executable is `C:\Users\Gamer\mame-vortex\mametiny.exe`; it reports MAME 0.289 and includes only the `vortexexec` tiny profile. The source tree and build output are separate from the application repository. The reproducible setup currently requires CMake-installed bundled Genie, native MSBuild, and native Python to generate MAME's version/driver/resource files; the final build instructions need a checked-in PowerShell wrapper. The currently verified debugger invocation is:
+## Windows CLI runner
+
+`tools/mame/run_headless.ps1` validates the local image (64 KiB and expected SHA-256), stages it under a temporary MAME ROM directory, performs deterministic soft reset, invokes the MAME debugger, and writes:
+
+- requested CSV trace with PC, opcode at the current instruction hook, MAME disassembly, cumulative/prior-instruction cycles, AX0/AX1/AY0/AY1, AR, MSTAT/SSTAT/IMASK/ICNTL, and IRQ0–IRQ3;
+- `.mame.trace`, the original MAME debugger trace;
+- `.hardware.log`, driver-reported hardware accesses;
+- `.run1.log` (and `.run2.log` with repeat mode), MAME process output.
+
+Examples in Windows PowerShell:
 
 ```powershell
-& C:\Users\Gamer\mame-vortex\mametiny.exe vortexexec `
-  -rompath C:\Users\Gamer\mame-vortex\roms -video none -sound none `
-  -skip_gameinfo -debug -debugscript C:\Users\Gamer\mame-vortex\research_vortexexec\boot.script -log
+tools\mame\run_headless.ps1 `
+  -Rom 'C:\Users\Gamer\vortex-win\research_local\Lexicon Vortex 1.1 (27C512).BIN' `
+  -Instructions 128 -Trace C:\Users\Gamer\research_local\boot.csv -Repeat
+
+tools\mame\run_headless.ps1 `
+  -Rom C:\Users\Gamer\vortex-win\research_local\Lexicon.bin `
+  -Cycles 100000 -Trace C:\Users\Gamer\research_local\cycles.csv
+
+tools\mame\run_headless.ps1 `
+  -Rom C:\Users\Gamer\vortex-win\research_local\Lexicon.bin `
+  -Instructions 4096 -Trace C:\Users\Gamer\research_local\compact.csv `
+  -TraceDetail compact
 ```
 
-The debugger script runs `step 128`, captures PC, MAME disassembly, selected registers and cycle fields, then exits. The first recorded instruction is at `0x004E`, because MAME has performed the page transfer and the reset branch before this debugger trace starts. It is not yet the requested `--rom/--cycles/--trace` CLI, and its trace has not yet been proven repeat-identical.
+`-TraceDetail full` (the default) includes the sampled register and IRQ columns. `compact` retains PC, opcode, disassembly, and cycle columns for longer runs. Both formats use the same MAME-generated instruction records; `-Repeat` compares the selected CSV plus the hardware log.
 
-## Run locally
+MAME debugger expressions print the opcode from its live program space (`d@pc & 0xffffff`), and the operation is MAME's decoder output. `softreset` is required at the start of the debugger script because MAME's initial debugger script runs after its first reset-vector instruction. With the explicit reset, the trace starts with `PC=0000`, `OP=1804EF`, `JUMP $004E`.
 
-The proprietary ROM is not a build input in Git. The user supplies a local path and the runner validates the 65,536-byte size and SHA-256 before copying it to MAME's ignored local ROM directory.
+MAME debugger numeric expressions default to hexadecimal. The runner emits an explicit `0x` step count. Instruction mode stops after the requested number of debugger steps unless the driver halts first. Cycle mode uses the requested count as a step cap; the tested boot prefix consumes at most one MAME core cycle per instruction. The CSV records `totalcycles` at each pre-instruction hook and `lastinstructioncycles` for the preceding instruction. Since the final instruction can finish after the last trace hook, this is an instruction-boundary cycle cap, not an asynchronous exact-cycle stop. Multi-cycle instructions or external wait states may exceed the requested cycle count; the current driver halts before the first unsupported external access. External-memory wait states are not modeled, so counts are not board-accurate timing.
+
+`-Repeat` launches twice from reset and byte-compares both the CSV instruction/register/opcode traces and hardware logs. It fails on any mismatch.
+
+The CSV captures CPU state per instruction, with memory operands in MAME disassembly. The separate hardware log captures accesses handled by the board maps, including unsupported reads/writes and latches. It does not yet hook every indirect internal PM/DM access as a separate event. IRQ0–IRQ3 values are sampled line levels per trace record; no interrupt edge was observed in the initial firmware prefix.
+
+## Tests
+
+With the native MAME executable available, run:
+
+```powershell
+tests\test_mame_synthetic.ps1
+```
+
+The test generates public synthetic 64 KiB code and checks PC 0 boot, the `JUMP $004E` branch, register state, MMR write, codec-reset latch, five-instruction limit, and repeated trace identity. It does not require Lexicon firmware. Existing Python tests remain independent and run with:
 
 ```sh
-tools/mame/run_local_rom.sh /path/to/mame-source /path/to/Lexicon\ Vortex\ 1.1\ \(27C512\).BIN 128
+python3 -m unittest tests.test_adsp_boot tests.test_rom_image -v
 ```
 
-The runner builds MAME's `tiny` target, starts the harness twice for a fixed instruction budget, captures CPU trace/state/cycle fields, compares the traces for determinism, and requires the first unknown external write (`PC=0x0053`, `DM=0x1F80`) to appear in MAME's log. Generated ROM copies and traces stay under ignored `research_local/` in the MAME source tree.
+## Local native build outline
 
-The disassembly helper also compiles MAME's unmodified ADSP disassembler implementation from the same pinned source:
+The build source lives in a separate MAME worktree at the pinned commit. Use bundled Genie with `--target=mame --subtarget=tiny --osd=windows --targetos=windows --PLATFORM=x64 vs2022`, then build `build/projects/windows/mametiny/vs2022/mametiny.sln` in Release/x64 through MSBuild with `PlatformToolset=v145`. MAME's generated version/driver/resource files must be created before MSBuild; see `docs/BUILD_WINDOWS.md` for project prerequisites. The resulting console application is `C:\Users\Gamer\mame-vortex\mametiny.exe`.
 
-```sh
-tools/mame/build_disassembler.sh /path/to/mame-source
-research_local/mame-adsp-disassemble /path/to/ROM.bin 0 > research_local/vortex-page0-mame.asm
-```
-
-## Validation boundary
-
-The MAME debugger trace records executed PC/opcode/operation and selected CPU registers/cycles. The memory handlers identify the first unsupported board access. Successful execution through several original instructions demonstrates CPU-core execution only. It does not demonstrate correct external ROM banking, DRAM, reset pin wiring, codec/SPORT operation, full firmware startup, or authentic audio.
-
-MAME sources: [ADSP core](https://github.com/mamedev/mame/blob/d19b5702bdbd1e6c14ecd522e9236154468fc4ef/src/devices/cpu/adsp2100/adsp2100.cpp), [ADSP disassembler](https://github.com/mamedev/mame/blob/d19b5702bdbd1e6c14ecd522e9236154468fc4ef/src/devices/cpu/adsp2100/2100dasm.cpp). MAME's ADSP files carry BSD-3-Clause notices; the MAME application/framework has broader aggregate licensing, so distribution of a binary must follow MAME's license requirements.
+MAME source references: [ADSP core at pinned commit](https://github.com/mamedev/mame/blob/d19b5702bdbd1e6c14ecd522e9236154468fc4ef/src/devices/cpu/adsp2100/adsp2100.cpp), [ADSP disassembler](https://github.com/mamedev/mame/blob/d19b5702bdbd1e6c14ecd522e9236154468fc4ef/src/devices/cpu/adsp2100/2100dasm.cpp). MAME source files carry BSD-3-Clause notices; distribution of an MAME binary must follow MAME's aggregate licensing requirements.

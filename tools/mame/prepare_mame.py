@@ -47,7 +47,7 @@ end
 ''')
 
     tiny_lst = mame / "src/mame/tiny.lst"
-    tiny_lst.write_text("@source:vortex/vortex_exec.cpp\nvortexexec\n")
+    tiny_lst.write_text("@source:vortex/vortex_exec.cpp\nvortexexec\nvortexsynthetic\n")
 
     # Keep the Windows OSD's null audio backend only.  This avoids compiling
     # physical WASAPI/XAudio2 device support into the headless execution build.

@@ -1,33 +1,61 @@
 # Original firmware emulation progress
 
-## Session status
+## Current result
 
-- Emulator work is isolated in `C:\\Users\\Gamer\\vortex-emulation`, based on `2a31e49`; the Windows GUI/audio worktree was not modified. Native MAME sources are a separate pinned worktree at `C:\\Users\\Gamer\\mame-vortex`.
-- Local ROM: 65,536 bytes, SHA-256 `1e79c704fbef8219b7fc53349064bc1afafd4287c3ca7442bb5587641a450892`. The file remains under ignored `research_local/` and is not included in Git.
-- Page 0 is 1,024 24-bit instructions, packed in the format used by MAME's ADSP boot loader. MAME's own disassembler has produced a complete local annotated listing at ignored `research_local/vortex-page0-mame.asm`.
-- Reset starts at processor `PC=0`. The first word `0x1804EF` is decoded as `JUMP $004E`; therefore the first candidate initialization routine begins at `PC=0x004E`. PC 1 is not the next executed instruction following this direct jump.
-- The remaining first words decode as `AY0 = $0020` (PC 1), `JUMP $0009` (PC 2), and `AY0 = $0200` (PC 3). MAME recognizes all four encodings; only PC 0 is on the reset path without another control-flow edge.
-- **Original firmware execution in MAME is achieved for the initial boot routine.** A native Windows x64 `mametiny.exe` linked from pinned MAME commit `d19b5702bdbd1e6c14ecd522e9236154468fc4ef`, with the ADSP21XX CPU and Vortex driver. MAME's debugger `step 128` trace executed from PC `0x004E` through subsequent original instructions. It is an executed instruction trace, not just static disassembly. The first trace row reports PC `0x004E`; the debugger attached after reset's boot transfer and branch, so this capture does not itself show PC 0's branch instruction. The trace shows each instruction at one reported cycle in this capture; do not interpret this as board-accurate external wait-state timing.
-- REA tools were not available. No ADSP instruction was executed in REA.
+- Native Windows x64 MAME executable: `C:\Users\Gamer\mame-vortex\mametiny.exe`, MAME 0.289, source commit `d19b5702bdbd1e6c14ecd522e9236154468fc4ef`.
+- Original ROM: 65,536 bytes, SHA-256 `1e79c704fbef8219b7fc53349064bc1afafd4287c3ca7442bb5587641a450892`. It remains ignored/local and is not committed.
+- `tools/mame/run_headless.ps1` runs the native MAME driver, checks ROM size/hash, captures a CSV plus raw MAME trace and board-access log, supports instruction or core-cycle budgets, and can run twice to compare determinism.
+- Reset tracing now starts at PC `0000`. `softreset` must be issued by the debugger script because MAME processes its initial debugger script only after executing the first reset-vector instruction. The trace reports live PM opcode reads from MAME's address space.
+- Repeated original-ROM run (`-Instructions 128 -Repeat`) produces identical CSV and hardware logs. The trace has **48 records**: 47 instructions completed, then the firmware reached `PC=0x019F` and blocked during its external PM operand read with `totalcycles=47`. It does not reach normal audio or a stable processing loop.
 
-## Verification performed
+## Executed trace excerpt
 
-- ROM size and SHA-256 were checked against the user-provided values.
-- `tools/mame/build_disassembler.sh` compiled MAME's actual ADSP disassembler at commit `d19b5702bdbd1e6c14ecd522e9236154468fc4ef`; it decoded all 1,024 page-0 words with ROM offsets and processor word addresses.
-- Native Windows Release build linked `C:\\Users\\Gamer\\mame-vortex\\mametiny.exe`; `-version` reports MAME 0.289 at the pinned commit and `-listfull vortexexec` registers the system. WASAPI/XAudio2 sources and registrations were excluded; the executable was run with `-video none -sound none`, with no physical audio device or window required. MSBuild's link succeeded, though its optional post-build step reports `pwsh.exe` missing; the produced executable runs.
-- Captured 128-instruction debugger trace: `C:\\Users\\Gamer\\mame-vortex\\research_vortexexec\\boot.trace` (ignored local research artifact). It records AX0/AX1/AY0/AY1, AR, MSTAT, SSTAT, IMASK, instruction cycles, total cycles, PC and MAME-decoded operation. At `PC=0x004E`, `IMASK=0`; at `0x004F`, `AX0=0x081A`; at `0x0050`, the core executes `DM($3FFF) = AX0`; at `0x0052`, it executes `DM($3FFE) = AX0`; at `0x0053`, it executes `DM($1F80) = AX0`.
-- `python3 -m unittest tests.test_adsp_boot tests.test_rom_image -v`: 8 synthetic tests passed. These check parser and page-packing behavior, not the proprietary ROM or MAME execution.
-- `git diff --check`: clean.
+Trace rows record CPU state immediately before the listed instruction. MAME's opcode field is read from the actual PM space and MAME supplies the disassembly.
 
-## First unresolved board dependency
+```text
+PC    OP      Instruction                 AX0    Previous cycles
+0000  1804EF  JUMP $004E                  0000   0
+004E  3C0003  IMASK = $0000                0000   1
+004F  4081A0  AX0 = $081A                  0000   1
+0050  93FFF0  DM($3FFF) = AX0              081A   1
+0051  410000  AX0 = $1000                  081A   1
+0052  93FFE0  DM($3FFE) = AX0              1000   1
+0053  91F800  DM($1F80) = AX0              1000   1
+0055  918000  DM($1800) = AX0              F000   1
+0069  91EC00  DM($1EC0) = AX0              F000   1
+...
+019F  500001  AX0 = PM(I4,M5)              3564   1
+```
 
-The first observed external-device operation is the executed write `PC=0x0053: DM(0x1F80)=AX0` (`AX0=0x1000`). The Vortex service-manual memory-map table identifies `0x1F80` as active-low `CODEC_RST/`; `0x1FC0` is its deassert/release alias. The harness now records the reset latch and logs the codec as unmodeled. This is the first hardware dependency reached, but not yet a blocker: execution continued after the write in the 128-instruction trace. The next display operation is `PC=0x0055: DM(0x1800)=AX0`. The CS4216 codec itself, external EPROM mapping, DRAM, and board timing are not modeled.
+The final trace record attempts `PM(0x0800)`. The handler records PC, address, AX/AY/AR, I4/M5 and cycle count, then asserts the ADSP HALT input. The CPU is no longer allowed to continue through fabricated `0xFFFFFF` program data. The access-time pre-state is included in the hardware log.
 
-## Next minimum work
+## Hardware activity observed
 
-1. Add a stable Windows command-line wrapper with the requested `--rom/--cycles/--trace` interface; the current native interface is MAME's `vortexexec` system and debugger script (`step N`), not a standalone runner.
-2. Attach the debugger before the reset vector to capture PC 0 and the executed `JUMP $004E`, and add opcode words directly to the CSV trace. The current trace's disassembly is from MAME's debugger; its first record starts at `0x004E`.
-3. Add repeat-run trace comparison and public synthetic integration tests. Existing 8 synthetic parser tests do not exercise the MAME CPU.
-4. Model the next device only when the trace shows its behavior matters; codec reset is observed and logged, but codec/SPORT operation is not modeled.
+The run logs these external writes before the first blocker:
 
-Do not infer normal Vortex startup or authentic audio from instruction decoding alone.
+| PC | DM address | Observed action | Evidence |
+|---:|---:|---|---|
+| `0050` | `3FFF` | write `081A` to ADSP system control MMR | MAME CPU and driver log |
+| `0052` | `3FFE` | write `1000` to ADSP wait-state MMR latch | MAME CPU and driver log; full effects not modeled |
+| `0053` | `1F80` | assert active-low CS4216 reset | Runtime trace plus service manual Chapter 4, printed page 4-3. The address alias selects the low latch output; data `1000` is irrelevant to polarity. |
+| `0055` | `1800` | write `F000` to display latch | Runtime trace plus service manual page 4-3. Scan multiplex timing is not modeled. |
+| `0069` | `1EC0` | release active-low ADC chip select | Runtime trace plus service manual page 4-3. TLC549 serial conversion is not modeled. |
+
+No EPROM A12/A14/A15 bank-select writes, DRAM data accesses, EEPROM serial transfers, or SPORT interrupts appear before the first external PM read. Service-manual PM mapping identifies `0800–0FFF` and `2000–2FFF` as EPROM space. The exact translation to the 27C512's byte addresses and 24-bit MAME PM words is unresolved, so no bank model is guessed.
+
+## Determinism and tests
+
+- Original firmware: two independent reset/run processes; CSV opcode/disassembly/register/cycle rows and hardware logs matched byte-for-byte. MAME's cycle counter is 47 before the blocked operand read.
+- MAME-backed public fixture: `tests/test_mame_synthetic.ps1` generates a clean synthetic 64 KiB ROM and checks PC0, branch to `004E`, register update, MMR write, codec-reset latch, exact 5-instruction budget, and identical repeat traces. Passed on native MAME/Windows.
+- Python synthetic suite: `python3 -m unittest tests.test_adsp_boot tests.test_rom_image -v` (8 tests passed).
+- `git diff --check`: clean after final edits.
+
+## Interpretation and next blocker
+
+The processor executes the initial firmware setup and reaches a firmware `DO` loop that reads program memory through `I4=0x0800`. This is not a DSP processing loop: the access is external EPROM data/code space and the harness does not yet map it. The exact CPU register state at the first unsupported access is logged before the operand read: `AX0=0x3564`, `AX1=0`, `AY0=0x00FF`, `AY1=0`, `AR=0x00000800`, `I4=0x0800`, `M5=1`, `PC=0x019F`, `totalcycles=47`.
+
+Next implement and verify the 27C512 program-memory bus and bank translation from the manual's three latch signals and ADSP-2105 external PM interface. Then model the documented two wait states and resume only after the fetched 24-bit word matches bytes from the verified ROM. Do not add a fake ROM mapping, DRAM fill, SPORT timing, or audio until its address and timing behavior are evidenced.
+
+## Branch and isolation
+
+The validated source/docs are committed to `codex/adsp2105-original-execution` at the current follow-up commit. All ROM copies and traces remain under ignored local research directories. The existing Vortex Lab GUI/audio worktree was not modified.

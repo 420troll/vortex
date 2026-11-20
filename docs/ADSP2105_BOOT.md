@@ -23,7 +23,7 @@ References: [Analog Devices ADSP-2105 data sheet](https://www.analog.com/media/e
 
 ## Local parser
 
-`tools/rom_inspector/rom_image.py` validates the user-provided 64 KiB image size and SHA-256 and decodes one aligned page. Five public unit tests use independent synthetic fixtures. `tools/mame/build_disassembler.sh` compiles MAME's own `2100dasm.cpp` from pinned source to create the annotated local listing.
+`tools/rom_inspector/rom_image.py` validates the user-provided 64 KiB image size and SHA-256 and decodes one aligned page. Eight Python unit tests use independent synthetic fixtures; `tests/test_mame_synthetic.ps1` additionally drives MAME's CPU with generated public synthetic firmware. `tools/mame/build_disassembler.sh` compiles MAME's own `2100dasm.cpp` from pinned source to create the annotated local listing.
 
 ## Vortex-specific unknowns
 
@@ -32,4 +32,6 @@ References: [Analog Devices ADSP-2105 data sheet](https://www.analog.com/media/e
 - Whether the image's nine plausible 4 KiB page headers represent boot pages, bank contents, or another organization.
 - Which PC ranges are reachable from normal reset and any later software boot-page load.
 
-The processor's reset behavior and the image's reset-vector jump are verified separately. Actual execution through MAME's ADSP-2105 core has now been observed in a native Windows build: its debugger trace starts at PC `0x004E`, immediately after the reset transfer and vector branch. The first executed routine writes `DM(0x3FFF)`, `DM(0x3FFE)`, then the service-manual codec reset alias `DM(0x1F80)`. The existing trace does not yet capture PC 0 itself, so the branch target is directly decoded and consistent with observed entry PC, but not yet recorded as a PC0 trace row.
+The processor's reset behavior and image's reset-vector jump have now also been observed in MAME execution. The first debugger trace missed PC `0x0000` because MAME processes the `-debugscript` after its first reset-vector instruction. The reproducible script begins with `softreset`, then enables tracing; the captured row is `PC=0000 OP=1804EF JUMP $004E`, followed by the instruction at `PC=004E`. The word is fetched live from the MAME CPU's program address space for the trace, not copied from a predicted disassembly.
+
+The original-ROM trace proceeds through `PC=0053 DM($1F80)=AX0`, which asserts the codec's active-low reset, and later to the first external PM read at `PC=019F`, `PM(0x0800)`. It has not yet verified external PM data or firmware beyond that read.
